@@ -1,0 +1,18 @@
+[submodule "fract"]
+	path = fract
+	url = git@github.com:LogicEu/fract.git
+[submodule "utopia"]
+	path = utopia
+	url = git@github.com:LogicEu/utopia.git
+[submodule "mass"]
+	path = mass
+	url = git@github.com:LogicEu/mass.git
+[submodule "glee"]
+	path = glee
+	url = git@github.com:LogicEu/glee.git
+[submodule "imgtool"]
+	path = imgtool
+	url = git@github.com:LogicEu/imgtool.git
+[submodule "gleex"]
+	path = gleex
+	url = git@github.com:LogicEu/gleex.git
