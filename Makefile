@@ -17,8 +17,8 @@ OS=$(shell uname -s)
 ifeq ($(OS),Darwin)
 	OSFLAGS=-framework OpenGL -mmacos-version-min=10.9
 else
-#WLFLAG=-Wl,--whole-archive
-#WRFLAG=-Wl,--no-whole-archive
+    WLFLAG=-Wl,--whole-archive
+    WRFLAG=-Wl,--no-whole-archive
 	OSFLAGS=-lm -lGL -lGLEW
 endif
 

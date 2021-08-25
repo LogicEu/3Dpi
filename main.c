@@ -1,9 +1,10 @@
 #include <mass.h>
 #include <gleex.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
-
-//#define BUG printf("File: %s, Line: %u, Func: %s\n", __FILE__, __LINE__, __func__)
+#include <time.h>
 
 unsigned int global_seed, lightshader, texshader, framebuffershader, skyboxshader, fontshader;
 const float half_pi = 3.14f / 2.0f;
@@ -197,10 +198,10 @@ skybox_t* space_skybox(const unsigned int w, const unsigned int h, const unsigne
 
 void shaders_init_this()
 {
-    unsigned int w, h, s;
+    int w, h, s;
     glee_window_get_size(&w, &h);
     s = glee_get_2d_scale();
-    float width = (float)(int)w, height = (float)(int)h, scale = (float)(int)s;
+    float width = (float)w, height = (float)h, scale = (float)(int)s;
 
     texshader = glee_shader_load("assets/shaders/texvert.frag", "assets/shaders/texfrag.frag");
     glUniform3f(glGetUniformLocation(texshader, "resolution"), width, height, scale);
@@ -227,7 +228,6 @@ void shaders_init_this()
     glUniform1f(glGetUniformLocation(lightshader, "point_light.quadratic"), 0.01f);
     glUniform1f(glGetUniformLocation(lightshader, "shininess"), 32.0f);
 
-    //framebuffershader = shader_load("shaders/framebufferv.frag", "shaders/framebufferf.frag");
     skyboxshader = glee_shader_load("assets/shaders/skyboxvert.frag", "assets/shaders/skyboxfrag.frag");
 }
 
@@ -295,10 +295,9 @@ int main()
     skybox_t* skybox = space_skybox(1080, 1080, 998, 1000, 2);
     mat4 mat_id = mat4_id();
 
-    //framebuffer_t* framebuffer = framebuffer_new();
-    unsigned int _w, _h;
+    int _w, _h;
     glee_window_get_size(&_w, &_h);
-    float width = (float)(int)_w, height = (float)(int)_h;
+    float width = (float)_w, height = (float)_h;
     float aspect = width / height;
     float planet_rot = 0.0f;
     char delta_string[20] = "0.0000";
@@ -307,8 +306,6 @@ int main()
     glee_screen_color(background.x, background.y, background.z, background.w);
     while(glee_window_is_open()) {
         glee_screen_clear();
-        //set_3d_mode();
-        //framebuffer_bind(framebuffer);
 
         float delta_time = glee_time_delta(&last_time);
         float delta_speed = delta_time * speed;
@@ -414,18 +411,7 @@ int main()
         glBindVertexArray(id_floor);
         glBindTexture(GL_TEXTURE_2D, gradient.id);
         glUniformMatrix4fv(glGetUniformLocation(lightshader, "model"), 1, GL_FALSE, &mat_id.data[0][0]);
-        glDrawElements(draw_kind, plane->indices->used, GL_UNSIGNED_INT, 0);
-
-        //glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        //screen_clear(&background.r);
-        //set_2d_mode();
-        //glBindVertexArray(quad);
-        //draw_framebuffer(&framebuffer->texture);
-        //draw_texture(&planet, core.width / core.scale - 10, core.height / core.scale - 10, 1.0f, 0.0f);
-        //draw_string("3Dpi", font, 10, core.height / core.scale - 48, 1.0f, 0.0f, 
-        //            color(0.5f, 0.5f, 1.0f, 1.0f));
-        //draw_string(delta_string, font, 10, core.height / core.scale - 128, 1.0f, 0.0f, color(0.5f, 0.5f, 1.0f, 1.0f));
-
+        glDrawElements(draw_kind, plane->indices->used, GL_UNSIGNED_INT, 0); 
         glee_screen_refresh();
     } 
     free(font);
