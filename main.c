@@ -203,15 +203,16 @@ void shaders_init_this()
     s = glee_get_2d_scale();
     float width = (float)w, height = (float)h, scale = (float)(int)s;
 
-    texshader = glee_shader_load("assets/shaders/texvert.frag", "assets/shaders/texfrag.frag");
+    texshader = glee_shader_load("shaders/texvert.frag", "shaders/texfrag.frag");
     glUniform3f(glGetUniformLocation(texshader, "resolution"), width, height, scale);
     glUniform4f(glGetUniformLocation(texshader, "camera"), 0.0f, 0.0f, 1.0f, 0.0f);
 
-    fontshader = glee_shader_load("assets/shaders/fontvert.frag", "assets/shaders/fontfrag.frag");
+    /*fontshader = glee_shader_load("shaders/fontvert.frag", "shaders/fontfrag.frag");
     glUniform3f(glGetUniformLocation(fontshader, "resolution"), width, height, scale);
-    glUniform4f(glGetUniformLocation(fontshader, "camera"), 0.0f, 0.0f, 1.0f, 0.0f);
+    glUniform4f(glGetUniformLocation(fontshader, "camera"), 0.0f, 0.0f, 1.0f,
+    0.0f);*/
 
-    lightshader = glee_shader_load("assets/shaders/lightv.frag", "assets/shaders/light.frag");
+    lightshader = glee_shader_load("shaders/lightv.frag", "shaders/light.frag");
     glUseProgram(lightshader);
     glUniform3f(glGetUniformLocation(lightshader, "global_light.direction"), -0.5f, -1.0f, -0.5f);
     glUniform3f(glGetUniformLocation(lightshader, "global_light.ambient"), 0.0f, 0.0f, 0.0f);
@@ -228,7 +229,7 @@ void shaders_init_this()
     glUniform1f(glGetUniformLocation(lightshader, "point_light.quadratic"), 0.01f);
     glUniform1f(glGetUniformLocation(lightshader, "shininess"), 32.0f);
 
-    skyboxshader = glee_shader_load("assets/shaders/skyboxvert.frag", "assets/shaders/skyboxfrag.frag");
+    skyboxshader = glee_shader_load("shaders/skyboxvert.frag", "shaders/skyboxfrag.frag");
 }
 
 int main()
@@ -251,8 +252,6 @@ int main()
     const float speed = 15.0f;
 
     vec4 background = {0.0f, 0.0f, 0.2f, 1.0f};
-    texture_t tile = texture_load("assets/sprites/tile.png");
-    font_t* font = font_load("assets/fonts/arcadeclassic.ttf", 24);
 
     float div = 32.0f;
     float last_time = glee_time_get();
@@ -375,10 +374,10 @@ int main()
             perlin_vmesh(plane, div);
         }
         if (glee_key_pressed(GLFW_KEY_P)) {
-            vmesh_write_file(mesh, "assets/models/vmesh.obj");
+            vmesh_write_file(mesh, "mesh.obj");
         }
         if (glee_key_pressed(GLFW_KEY_O)) {
-            vmesh_write_file_quick(mesh, "assets/models/vmeshq.obj");
+            vmesh_write_file_quick(mesh, "meshq.obj");
         }
         if (glee_key_pressed(GLFW_KEY_B)) {
             vmesh_smooth_sphere(&mesh);
@@ -414,7 +413,6 @@ int main()
         glDrawElements(draw_kind, plane->indices->used, GL_UNSIGNED_INT, 0); 
         glee_screen_refresh();
     } 
-    free(font);
     free(skybox);
     vmesh_free(mesh);
     vmesh_free(plane);
