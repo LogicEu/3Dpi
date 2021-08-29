@@ -44,5 +44,8 @@ $(LDIR):
 $(LDIR)%.a: %
 	cd $^ && make && mv $@ ../
 
+exe:
+	$(CC) -o $(NAME) $(SRC) $(CFLAGS) $(LFLAGS)
+
 clean:
 	rm -r $(LDIR) && rm $(NAME)

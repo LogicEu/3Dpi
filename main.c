@@ -302,6 +302,7 @@ int main()
     char delta_string[20] = "0.0000";
     int alarm = 20;
 
+    mat4 projection = mat4_perspective_RH(deg_to_rad(45.0f), aspect, 0.1f, 1000.0f);
     glee_screen_color(background.x, background.y, background.z, background.w);
     while(glee_window_is_open()) {
         glee_screen_clear();
@@ -322,8 +323,7 @@ int main()
         vec3 direction = {cos(v) * sin(h), sin(v), cos(v) * cos(h)};
         vec3 right = {sin(h - half_pi), 0.0f, cos(h - half_pi)};
         vec3 up = vec3_cross(right, direction);
-
-        mat4 projection = mat4_perspective_RH(deg_to_rad(45.0f), aspect, 0.1f, 100.0f);
+ 
         mat4 view = mat4_look_at_RH(position, vec3_add(position, direction), up);
 
         if (glee_key_pressed(GLFW_KEY_ESCAPE)) break;
