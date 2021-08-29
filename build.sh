@@ -3,7 +3,12 @@
 cc=gcc
 src=*.c
 exe=3Dpi
-std=-'std=c99'
+std='-std=c99'
+
+if echo "$OSTYPE" | grep -q "linux"; then
+    rflag="-Wl,--whole-archive"
+    lflag="-Wl,--no-whole-archive"
+fi
 
 flags=(
     $std
@@ -13,8 +18,6 @@ flags=(
 )
 
 inc=(
-    -I.
-    -Iinclude/
     -Imass/
     -Ifract/
     -Iutopia/
@@ -25,17 +28,19 @@ inc=(
 
 lib=(
     -Llib/
-    -lglfw
-    -lfreetype
-    -lz
-    -lpng
-    -ljpeg
+    $rflag
     -lfract
     -lutopia
     -lglee
     -lgleex
     -limgtool
     -lmass
+    $lflag
+    -lglfw
+    -lfreetype
+    -lz
+    -lpng
+    -ljpeg
 )
 
 linux=(
