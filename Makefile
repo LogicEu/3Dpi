@@ -10,6 +10,8 @@ CC=gcc
 NAME=3Dpi
 SRC=*.c
 
+SCRIPT=build.sh
+
 IDIR += $(patsubst %,-I%/,$(SLIBS))
 CFLAGS=$(STD) $(WFLAGS) $(OPT) $(IDIR)
 OS=$(shell uname -s)
@@ -47,5 +49,5 @@ $(LDIR)%.a: %
 exe:
 	$(CC) -o $(NAME) $(SRC) $(CFLAGS) $(LFLAGS)
 
-clean:
-	rm -r $(LDIR) && rm $(NAME)
+clean: $(SCRIPT)
+	./$^ $@

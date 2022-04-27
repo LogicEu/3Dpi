@@ -6,82 +6,130 @@
 #include <string.h>
 #include <time.h>
 
-unsigned int global_seed, lightshader, texshader, framebuffershader, skyboxshader, fontshader;
-const float half_pi = 3.14f / 2.0f;
+static const float half_pi = M_PI * 0.5f;
 
-void vertex_element_buffer_obj(unsigned int id, array_t* vertices, array_t* indices, obj_flag type)
-{
-    if (!vertices || !indices) return;
-    unsigned int VBO, EBO;
-    glGenBuffers(1, &VBO);
-    glGenBuffers(1, &EBO);
-    glBindVertexArray(id);
-    glBindBuffer(GL_ARRAY_BUFFER, VBO);
-    glBufferData(GL_ARRAY_BUFFER, vertices->used * vertices->bytes, vertices->data, GL_STATIC_DRAW);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices->used * indices->bytes, indices->data, GL_STATIC_DRAW);
+static unsigned int global_seed;
+static unsigned int lightshader;
+static unsigned int texshader;
+static unsigned int skyboxshader;
 
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, vertices->bytes, (void*)0);
-    if (type == OBJ_VTN) {
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, vertices->bytes, (void*)offsetof(vertex_t, uv));
-    }
-    if (type != OBJ_V) {
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, vertices->bytes, (void*)offsetof(vertex_t, normal));
-    }
-}
-
-void vmesh_bind(unsigned int id, vmesh_t* mesh)
-{
-    if (!mesh) return;
-    vertex_element_buffer_obj(id, mesh->vertices, mesh->indices, mesh->type);
-}
-
-void perlin_mesh(mesh_t* mesh, float mult)
-{   
-    for (int i = 0; i < mesh->vertices->used; i++) {
-        vec3* v = (vec3*)array_index(mesh->vertices, i);
-        v->y = perlin2d(v->x, v->z, 0.01, 4, global_seed) * mult;
-    }
-    mesh->normals = vec3_face_normal_array(mesh->vertices);
-}
-
-void perlin_vmesh(vmesh_t* mesh, float mult)
-{
-    for (int i = 0; i < mesh->vertices->used; i++) {
-        vertex_t* v = (vertex_t*)array_index(mesh->vertices, i);
-        vec3 pos = v->position;
-        v->position.y = perlin2d(pos.x, pos.z, 0.01, 4, global_seed) * mult;
-    }
-    mesh->type = OBJ_VN;
-    vertex_array_set_face_normal(mesh->vertices, mesh->indices);
-}
-
-uint8_t lerpu8(uint8_t a, uint8_t b, float f)
+static inline uint8_t lerpu8(uint8_t a, uint8_t b, float f)
 {
     return (uint8_t)lerpf((float)a, (float)b, f);
 }
 
-void pixel_lerp(uint8_t* dst, uint8_t* a, uint8_t* b, uint8_t channels)
+static inline void pixel_lerp(uint8_t* dst, uint8_t* a, uint8_t* b, const uint8_t channels)
 {
-    for (int i = 0; i < channels; i++) {
+    for (uint8_t i = 0; i < channels; i++) {
         dst[i] = lerpu8(a[i], b[i], 0.5f);
     }
 }
 
-void scale_gradient_bitmap(bmp_t* bitmap)
+static unsigned int mesh_bind(const mesh_t* restrict mesh)
+{
+    if (!mesh || !mesh->vertices.size) {
+        return 0;
+    }
+
+    unsigned int id = glee_buffer_id();
+
+    glee_buffer_create(id, mesh->vertices.data, mesh->vertices.size * mesh->vertices.bytes);
+    glee_buffer_attribute_set(0, 3, 0, 0);
+    
+    if (mesh->uvs.size) {
+        glee_buffer_create(id, mesh->uvs.data, mesh->uvs.size * mesh->uvs.bytes);
+        glee_buffer_attribute_set(1, 2, 0, 0);
+    }
+
+    if (mesh->normals.size) {
+        glee_buffer_create(id, mesh->normals.data, mesh->normals.size * mesh->normals.bytes);
+        glee_buffer_attribute_set(2, 3, 0, 0);
+    }
+
+    return id;
+}
+
+/* pass mesh with existing normal array */
+static void mesh_smooth_optim(mesh_t* restrict mesh)
+{
+    table_t table = table_compress(&mesh->vertices);
+    const size_t size = table.size;
+
+    vec3* nn = mesh->normals.data;    
+    vec3 normals[size];
+
+    const vec3* v = table.data;
+    for (size_t i = 0; i < size; ++i, ++v) {
+        size_t* search = array_search_all(&mesh->vertices, v);
+        vec3 n = {0.0, 0.0, 0.0};
+    
+        size_t j;
+        for (j = 0; search[j]; ++j) {
+            n = vec3_add(n, nn[search[j] - 1]);
+        }
+
+        normals[i] = vec3_normal(vec3_div(n, (float)j));
+        free(search);
+    }
+
+    array_clear(&mesh->normals);
+    for (size_t i = 0; table.indices[i]; ++i) {
+        array_push(&mesh->normals, &normals[table.indices[i] - 1]);
+    }
+
+    table_free(&table);
+}
+
+static void mesh_smooth_sphere(mesh_t* restrict mesh)
+{
+    array_free(&mesh->normals);
+    mesh->normals = array_copy(&mesh->vertices);
+}
+
+static void mesh_perlinize(mesh_t* restrict mesh, const float mult)
+{   
+    vec3* v = mesh->vertices.data;
+    for (size_t i = 0; i < mesh->vertices.size; ++i, ++v) {
+        v->y = perlin2d(v->x, v->z, 0.01f, 4, global_seed) * mult;
+    }
+    mesh_normals_get_face(mesh);
+}
+
+static void mesh_min_max_height(const mesh_t* restrict mesh, float* restrict min, float* restrict max)
+{
+    float max_ret = -1000.0f;
+    float min_ret = 1000.0f;
+    vec3* v = mesh->vertices.data;
+    for (vec3* const end = v + mesh->vertices.size; v != end; ++v) {
+        if (v->y > max_ret) max_ret = v->y;
+        if (v->y < min_ret) min_ret = v->y;
+    }
+    *max = max_ret;
+    *min = min_ret;
+}
+
+static void mesh_height_color_gradient(mesh_t* restrict mesh)
+{
+    float max, min;
+    mesh_min_max_height(mesh, &min, &max);
+    vec3* v = mesh->vertices.data;
+    for (vec3* const end = v + mesh->vertices.size; v != end; ++v) {
+        vec2 uv = vec2_new(inverse_lerpf(min, max, v->y), 0.0f);
+        array_push(&mesh->uvs, &uv);
+    }
+}
+
+static void scale_gradient_bitmap(bmp_t* bitmap)
 {
     bmp_t b = bmp_new(bitmap->width * 2 - 1, 1, bitmap->channels);
-    for (int i = 0; i < b.width; i++) {
+    for (int i = 0; i < (int)b.width; i++) {
         if (i % 2 == 0) {
             memcpy(px_at(&b, i, 0), px_at(bitmap, i / 2, 0), b.channels);
         } else {
             int min = (i - 1) / 2;
             int max = (i + 1) / 2;
             min *= (min > 0);
-            if (max > bitmap->width) max = bitmap->width;
+            if (max > (int)bitmap->width) max = bitmap->width;
             pixel_lerp(px_at(&b, i, 0), px_at(bitmap, min, 0), px_at(bitmap, max, 0), b.channels);
         }
     }
@@ -89,17 +137,17 @@ void scale_gradient_bitmap(bmp_t* bitmap)
     *bitmap = b;
 }
 
-void scale_gradient_bmp_irregular(bmp_t* bitmap)
+static void scale_gradient_bmp_irregular(bmp_t* bitmap)
 {
     bmp_t b = bmp_new(bitmap->width * 2 - 1, 1, bitmap->channels);
-    for (int i = 0; i < b.width; i++) {
+    for (int i = 0; i < (int)b.width; i++) {
         if (i % 2 == 0) {
             memcpy(px_at(&b, i, 0), px_at(bitmap, i / 2, 0), b.channels);
         } else {
             int min = i / 2 - 1;
             int max = i / 2 + 1;
             min *= (min > 0);
-            if (max > bitmap->width) max = bitmap->width;
+            if (max > (int)bitmap->width) max = bitmap->width;
             pixel_lerp(px_at(&b, i, 0), px_at(bitmap, min, 0), px_at(bitmap, max, 0), b.channels);
         }
     }
@@ -107,7 +155,7 @@ void scale_gradient_bmp_irregular(bmp_t* bitmap)
     *bitmap = b;
 }
 
-bmp_t gradient_planet()
+static bmp_t gradient_planet()
 {
     bmp_t bitmap = bmp_new(6, 1, 4);
     uint8_t* buff = bitmap.pixels;
@@ -120,7 +168,7 @@ bmp_t gradient_planet()
     return bitmap;
 }
 
-bmp_t gradient_bitmap()
+static bmp_t gradient_bitmap()
 {
     bmp_t bitmap = bmp_new(8, 1, 4);
     uint8_t* buff = bitmap.pixels;
@@ -135,36 +183,38 @@ bmp_t gradient_bitmap()
     return bitmap;
 }
 
-void bmp_smooth(bmp_t* bitmap, const unsigned int smooth)
+static void bmp_smooth(bmp_t* restrict bitmap, const unsigned int smooth)
 {
-    for (int y = 0; y < bitmap->height; y++) {
-        for (int x = 0; x < bitmap->width; x++) {
+    for (int y = 0; y < (int)bitmap->height; y++) {
+        for (int x = 0; x < (int)bitmap->width; x++) {
             if (*px_at(bitmap, x, y) > 105 && rand() % smooth != 0) {
-                if (x + 1 < bitmap->width) pixel_lerp(px_at(bitmap, x + 1, y), px_at(bitmap, x + 1, y), px_at(bitmap, x, y), bitmap->channels);
+                if (x + 1 < (int)bitmap->width) pixel_lerp(px_at(bitmap, x + 1, y), px_at(bitmap, x + 1, y), px_at(bitmap, x, y), bitmap->channels);
                 if (x - 1 >= 0) pixel_lerp(px_at(bitmap, x - 1, y), px_at(bitmap, x - 1, y), px_at(bitmap, x, y), bitmap->channels);
-                if (y + 1 < bitmap->height) pixel_lerp(px_at(bitmap, x, y + 1), px_at(bitmap, x, y + 1), px_at(bitmap, x, y), bitmap->channels);
+                if (y + 1 < (int)bitmap->height) pixel_lerp(px_at(bitmap, x, y + 1), px_at(bitmap, x, y + 1), px_at(bitmap, x, y), bitmap->channels);
                 if (y - 1 >= 0) pixel_lerp(px_at(bitmap, x, y - 1), px_at(bitmap, x, y - 1), px_at(bitmap, x, y), bitmap->channels);
             }
         }
     }
 }
 
-bmp_t space_bitmap(const unsigned int w, const unsigned int h, const unsigned int n, const unsigned in, const unsigned int smooth)
+static bmp_t space_bitmap(const unsigned int w, const unsigned int h, const unsigned int n, const unsigned in, const unsigned int smooth)
 {
     uint8_t color[] = {0, 0, 0, 0};
     bmp_t bitmap = bmp_color(w, h, 4, &color[0]);
-    for (int y = 0; y < bitmap.height; y++) {
-        for (int x = 0; x < bitmap.width; x++) {
+    for (int y = 0; y < (int)bitmap.height; y++) {
+        for (int x = 0; x < (int)bitmap.width; x++) {
             if (rand() % in > n) memset(px_at(&bitmap, x, y), 255, bitmap.channels);
         }
     }
-    for (int i = 0; i < smooth; i++) {
+
+    for (unsigned int i = 0; i < smooth; i++) {
         bmp_smooth(&bitmap, smooth);
     }
+
     return bitmap;
 }
 
-texture_t space_cubemap(const unsigned int w, const unsigned int h, const unsigned int n, const unsigned int in, const unsigned int smooth)
+static texture_t space_cubemap(const unsigned int w, const unsigned int h, const unsigned int n, const unsigned int in, const unsigned int smooth)
 {
     texture_t texture;
     texture.width = w;
@@ -188,29 +238,23 @@ texture_t space_cubemap(const unsigned int w, const unsigned int h, const unsign
     return texture;
 }
 
-skybox_t* space_skybox(const unsigned int w, const unsigned int h, const unsigned int n, const unsigned int in, const unsigned int smooth)
+static skybox_t space_skybox(const unsigned int w, const unsigned int h, const unsigned int n, const unsigned int in, const unsigned int smooth)
 {
-    skybox_t* skybox = (skybox_t*)malloc(sizeof(skybox_t));
-    skybox->cubemap = space_cubemap(w, h, n, in, smooth);
-    skybox->VAO = glee_buffer_skybox_create();
+    skybox_t skybox;
+    skybox.cubemap = space_cubemap(w, h, n, in, smooth);
+    skybox.VAO = glee_buffer_skybox_create();
     return skybox;
 }
 
-void shaders_init_this()
+void shaders_init()
 {
-    int w, h, s;
+    int w, h;
     glee_window_get_size(&w, &h);
-    s = glee_get_2d_scale();
-    float width = (float)w, height = (float)h, scale = (float)(int)s;
+    float width = (float)w, height = (float)h, scale = 1.0;
 
     texshader = glee_shader_load("shaders/texvert.frag", "shaders/texfrag.frag");
     glUniform3f(glGetUniformLocation(texshader, "resolution"), width, height, scale);
-    glUniform4f(glGetUniformLocation(texshader, "camera"), 0.0f, 0.0f, 1.0f, 0.0f);
-
-    /*fontshader = glee_shader_load("shaders/fontvert.frag", "shaders/fontfrag.frag");
-    glUniform3f(glGetUniformLocation(fontshader, "resolution"), width, height, scale);
-    glUniform4f(glGetUniformLocation(fontshader, "camera"), 0.0f, 0.0f, 1.0f,
-    0.0f);*/
+    glUniform4f(glGetUniformLocation(texshader, "camera"), 0.0f, 0.0f, 1.0f, 0.0f); 
 
     lightshader = glee_shader_load("shaders/lightv.frag", "shaders/light.frag");
     glUseProgram(lightshader);
@@ -236,62 +280,59 @@ int main()
 {
     glee_init();
     glee_window_create("Space", 800, 600, 0, 0);
-    glee_set_3d_mode();
-    shaders_init_this();
+    glee_mode_set(GLEE_MODE_3D);
+    shaders_init();
 
-    unsigned int quad = glee_buffer_quad_create();
+    //unsigned int quad = glee_buffer_quad_create();
     global_seed = rand_uint(rand_uint(time(NULL)));
     printf("Seed: %u\n", global_seed);
 
     unsigned int draw_kind = 4;
-    float scale = 1.0f, rot = 0.0f;
     vec3 position = {0., 3., -5.};
 
     float v = 0.0f, h = 0.0f;
-    const float mouse_speed = 0.005f;
     const float speed = 15.0f;
-
-    vec4 background = {0.0f, 0.0f, 0.2f, 1.0f};
 
     float div = 32.0f;
     float last_time = glee_time_get();
+
     bmp_t bitmap = gradient_planet();
     for (int i = 0; i < 8; i++) {
         scale_gradient_bmp_irregular(&bitmap);
     }
+
     texture_t planet = texture_from_bmp(&bitmap);
-    vmesh_t* mesh2 = vmesh_shape_sphere(8);
-    vmesh_t* mesh = vmesh_shape_sphere(4);
-    vmesh_scale(mesh, 12.0f);
-    vmesh_scale(mesh2, 6.0f);
-    vmesh_move(mesh2, vec3_new(34.0f, 0.0f, 0.0f));
-    vmesh_combine(mesh, mesh2);
-    vmesh_height_color_gradient(mesh);
-    unsigned int id_planet = glee_buffer_id();
-    mesh->type = OBJ_VTN;
-    vmesh_bind(id_planet, mesh);
-    printf("Planet mesh: %d, %d, %d\n", mesh->vertices->used, mesh->indices->used, id_planet);
+    mesh_t mesh2 = mesh_shape_sphere(8);
+    mesh_t mesh = mesh_shape_sphere(4);
+    mesh_scale(&mesh, 12.0f);
+    mesh_scale(&mesh2, 6.0f);
+    mesh_move(&mesh2, vec3_new(34.0f, 0.0f, 0.0f));
+    mesh_merge(&mesh, &mesh2);
+    mesh_height_color_gradient(&mesh);
+    
+    unsigned int id_planet = mesh_bind(&mesh);
+    printf("Planet mesh: %zu, %u\n", mesh.vertices.size, id_planet);
     printf("Time: %f\n", glee_time_get() - last_time);
 
     last_time = glee_time_get();
     bitmap = gradient_bitmap();
     for (int i = 0; i < 4; i++) {
         scale_gradient_bitmap(&bitmap);
-    }
+    }  
 
     texture_t gradient = texture_from_bmp(&bitmap);
-    vmesh_t* plane = vmesh_shape_plane(100, 100);
-    perlin_vmesh(plane, div);
-    vmesh_smooth_optim(&plane);
-    vmesh_height_color_gradient(plane);
-    unsigned int id_floor = glee_buffer_id();
-    mesh->type = OBJ_VTN;
-    vmesh_bind(id_floor, plane);
-    printf("Plane mesh: %d, %d, %d\n", plane->vertices->used, plane->indices->used, id_floor);
+    mesh_t plane = mesh_shape_plane(100, 100);
+    mesh_perlinize(&plane, div);
+    //mesh_smooth_optim(&plane);
+    mesh_height_color_gradient(&plane);
+    
+    unsigned int id_floor = mesh_bind(&plane);
+    
+    printf("Plane mesh: %zu, %u\n", plane.vertices.size, id_floor);
     printf("Time: %f\n", glee_time_get() - last_time);
 
     bool flag = true;
-    skybox_t* skybox = space_skybox(1080, 1080, 998, 1000, 2);
+    skybox_t skybox = space_skybox(1080, 1080, 998, 1000, 2);
     mat4 mat_id = mat4_id();
 
     int _w, _h;
@@ -303,9 +344,10 @@ int main()
     int alarm = 20;
 
     mat4 projection = mat4_perspective_RH(deg_to_rad(45.0f), aspect, 0.1f, 1000.0f);
-    glee_screen_color(background.x, background.y, background.z, background.w);
+
+    glee_screen_color(0.0f, 0.0f, 0.2f, 1.0f);
     while(glee_window_is_open()) {
-        glee_screen_clear();
+        glee_screen_clear(GLEE_MODE_3D);
 
         float delta_time = glee_time_delta(&last_time);
         float delta_speed = delta_time * speed;
@@ -343,27 +385,15 @@ int main()
         if (glee_key_down(GLFW_KEY_DOWN)) position.z -= delta_speed;
         if (glee_key_down(GLFW_KEY_RIGHT)) position.x += delta_speed;
         if (glee_key_down(GLFW_KEY_LEFT)) position.x -= delta_speed;
-        if (glee_key_down(GLFW_KEY_P)) scale += delta_time;
-        if (glee_key_down(GLFW_KEY_O)) scale -= delta_time;
-        if (glee_key_down(GLFW_KEY_K)) rot += delta_time;
-        if (glee_key_down(GLFW_KEY_L)) rot -= delta_time;
         if (glee_key_pressed(GLFW_KEY_M)) {
-            div++;
-            perlin_vmesh(plane, div);
+            mesh_perlinize(&plane, ++div);
         }
         if (glee_key_pressed(GLFW_KEY_N)) {
-            div--;
-            perlin_vmesh(plane, div);
+            mesh_perlinize(&plane, --div);
         }
         if (glee_key_pressed(GLFW_KEY_SPACE)) {
-            if (flag) {
-                background = vec4_new(0.3f, 0.3f, 1.0f, 1.0f);
-                flag = false;
-            }
-            else {
-                background = vec4_new(0.0f, 0.0f, 0.1f, 1.0f);
-                flag = true;
-            }
+            if (flag) flag = false;
+            else flag = true;
         }
         if (glee_key_pressed(GLFW_KEY_V)) {
             if (draw_kind == 0x0004) draw_kind = 0x0001;
@@ -371,24 +401,24 @@ int main()
         }
         if (glee_key_pressed(GLFW_KEY_R)) {
             global_seed = rand_uint(rand());
-            perlin_vmesh(plane, div);
+            mesh_perlinize(&plane, div);
         }
         if (glee_key_pressed(GLFW_KEY_P)) {
-            vmesh_write_file(mesh, "mesh.obj");
+            mesh_save(&plane, "mesh.obj");
         }
         if (glee_key_pressed(GLFW_KEY_O)) {
-            vmesh_write_file_quick(mesh, "meshq.obj");
+            mesh_save_quick(&plane, "meshq.obj");
         }
         if (glee_key_pressed(GLFW_KEY_B)) {
-            vmesh_smooth_sphere(&mesh);
+            mesh_smooth_sphere(&mesh);
         }
 
         if (flag) {
             mat4 mat = mat4_mult(projection, mat4_mult(mat4_look_at(vec3_uni(0.0f), direction, up), mat4_id()));
             glDepthMask(GL_FALSE);
             glUseProgram(skyboxshader);
-            glBindVertexArray(skybox->VAO);
-            glBindTexture(GL_TEXTURE_CUBE_MAP, skybox->cubemap.id);
+            glBindVertexArray(skybox.VAO);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, skybox.cubemap.id);
             glUniformMatrix4fv(glGetUniformLocation(skyboxshader, "MVP"), 1, GL_FALSE, &mat.data[0][0]);
             glDrawArrays(GL_TRIANGLES, 0, 36);
             glDepthMask(GL_TRUE);
@@ -405,17 +435,19 @@ int main()
         glUniformMatrix4fv(glGetUniformLocation(lightshader, "view"), 1, GL_FALSE, &view.data[0][0]);
         glUniformMatrix4fv(glGetUniformLocation(lightshader, "projection"), 1, GL_FALSE, &projection.data[0][0]);
         glUniformMatrix4fv(glGetUniformLocation(lightshader, "model"), 1, GL_FALSE, &planet_model.data[0][0]);
-        glDrawElements(draw_kind, mesh->indices->used, GL_UNSIGNED_INT, 0);
+        glDrawArrays(draw_kind, 0, mesh.vertices.size);
 
         glBindVertexArray(id_floor);
         glBindTexture(GL_TEXTURE_2D, gradient.id);
         glUniformMatrix4fv(glGetUniformLocation(lightshader, "model"), 1, GL_FALSE, &mat_id.data[0][0]);
-        glDrawElements(draw_kind, plane->indices->used, GL_UNSIGNED_INT, 0); 
+        glDrawArrays(draw_kind, 0, plane.vertices.size); 
+        
         glee_screen_refresh();
     } 
-    free(skybox);
-    vmesh_free(mesh);
-    vmesh_free(plane);
+    
+    mesh_free(&mesh);
+    mesh_free(&plane);
+    
     glee_deinit();
-    return 0;
+    return EXIT_SUCCESS;;
 }

@@ -3,7 +3,6 @@
 cc=gcc
 src=*.c
 exe=3Dpi
-std='-std=c99'
 
 if echo "$OSTYPE" | grep -q "linux"; then
     rflag="-Wl,--whole-archive"
@@ -11,7 +10,7 @@ if echo "$OSTYPE" | grep -q "linux"; then
 fi
 
 flags=(
-    $std
+    -std=c99
     -Wall
     -Wextra
     -O2
@@ -61,7 +60,7 @@ compile() {
     elif echo "$OSTYPE" | grep -q "linux"; then
         $cc ${flags[*]} ${inc[*]} ${lib[*]} ${linux[*]} $src -o $exe
     else
-        echo "OS is not supported yet..." && exit
+        echo "This OS is not supported yet..." && exit
     fi
 }
 
@@ -71,35 +70,30 @@ build_lib() {
 
 build() {
     mkdir lib/
-    build_lib fract -s
-    build_lib utopia -slib
-    build_lib imgtool -slib
-    build_lib mass -s
-    build_lib glee -s
+    build_lib fract static
+    build_lib utopia static
+    build_lib imgtool static
+    build_lib mass static
+    build_lib glee static
     build_lib gleex -s
 }
 
 clean() {
-    rm -r lib && rm $exe
-}
-
-fail() {
-    echo "Use 'comp' to compile game and 'build' to build libraries." && exit
+    [ -d lib ] && rm -r lib && echo "deleted lib"
+    [ -f $exe ] && rm $exe && echo "deleted $exe"
+    return 0
 }
 
 case "$1" in
-    "run")
-        shift
-        compile && ./$exe "$@";;
     "comp")
         compile;;
     "build")
         build;;
     "all")
-        shift
-        build && compile && ./$exe "$@";;
+        build && compile;;
     "clean")
         clean;;
     *)
-        fail;;
+        echo "Run with 'build' or 'comp' to compile dependencies and executable"
+        echo "Use 'clean' to remove local builds";;
 esac
