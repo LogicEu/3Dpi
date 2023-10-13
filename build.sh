@@ -50,9 +50,7 @@ linux=(
 
 mac=(
     -framework OpenGL
-    -mmacos-version-min=10.9
 )
-
 
 compile() {
     if echo "$OSTYPE" | grep -q "darwin"; then
